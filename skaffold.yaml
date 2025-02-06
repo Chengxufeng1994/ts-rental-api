@@ -1,0 +1,47 @@
+apiVersion: skaffold/v4beta12
+kind: Config
+metadata:
+  name: ts-rental-api
+build:
+  artifacts:
+    - image: rent-app
+      docker:
+        dockerfile: Dockerfile
+      sync:
+        manual:
+        # Sync all the javascript files that are in the src folder
+        # with the container src folder
+        - src: 'src/**/*.ts'
+          dest: .
+
+manifests:
+  rawYaml:
+    - deployment/k8s/deployment.yaml
+    - deployment/k8s/service.yaml
+
+deploy:
+  helm:
+    releases:
+      - name: postgresql
+        repo: https://charts.bitnami.com/bitnami
+        remoteChart: postgresql
+        namespace: default
+        setValues:
+          global.postgresql.auth.postgresPassword: postgres
+          global.postgresql.auth.database: postgres
+          global.postgresql.auth.username: postgres
+          global.postgresql.auth.password: postgres
+          aglobal.postgresql.rchitecture: standalone
+
+portForward:
+- resourceType: service
+  resourceName: rent-app
+  namespace: default
+  port: 3000
+  localPort: 3000
+
+- resourceType: service
+  resourceName: postgresql
+  namespace: default
+  port: 5432
+  localPort: 15432

@@ -1,0 +1,149 @@
+services:
+  postgres:
+    container_name: postgres
+    hostname: postgres
+    image: postgres:16-alpine
+    restart: always
+    ports:
+      - 5432:5432
+    volumes:
+      - $PWD/migrations:/docker-entrypoint-initdb.d
+      - pgdata:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 10s
+      retries: 5
+      start_period: 30s
+      timeout: 10s
+    networks:
+      - rental_network
+
+  pgadmin:
+    container_name: pgadmin
+    hostname: pgadmin
+    image: dpage/pgadmin4
+    restart: always
+    ports:
+      - 5050:80
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=admin@gmail.com
+      - PGADMIN_DEFAULT_PASSWORD=admin
+    depends_on:
+      postgres:
+        condition: service_healthy
+        restart: true
+    links:
+      - "postgres:db"
+    configs:
+      - source: servers.json
+        target: /pgadmin4/servers.json
+      - source: pgpass
+        target: /pgpass
+    networks:
+      - rental_network
+
+  collector:
+    container_name: collector
+    hostname: collector
+    image: otel/opentelemetry-collector-contrib:0.114.0
+    command: [
+      "--config=/etc/otel-config.yml",
+    ]
+    depends_on:
+      - jaeger
+    volumes:
+      - $PWD/build/docker/otel/otel-config.yml:/etc/otel-config.yml
+    ports:
+      - "1888:1888"   # pprof extension
+      - "8888:8888"   # Prometheus metrics exposed by the collector
+      - "8889:8889"   # Prometheus exporter metrics
+      - "13133:13133" # health_check extension
+      - "4317:4317"   # OTLP gRPC receiver
+      - "4318:4318"   # OTLP http receiver
+      - "55679:55679" # zpages extension
+    profiles:
+      - monitoring
+    networks:
+      - rental_network
+
+  jaeger:
+    container_name: jaeger
+    hostname: jaeger
+    image: jaegertracing/all-in-one:1.63.0
+    command:
+      - "--prometheus.server-url=http://prometheus:9090"
+      - "--prometheus.query.normalize-duration=true"
+      - "--prometheus.query.normalize-calls=true"
+    ports:
+      - "16686:16686"
+    environment:
+      - METRICS_STORAGE_TYPE=prometheus
+    profiles:
+      - monitoring
+    networks:
+      - rental_network
+
+  prometheus:
+    container_name: prometheus
+    hostname: prometheus
+    image: prom/prometheus:v3.0.0
+    command: [
+      "--config.file=/etc/prometheus/prometheus-config.yml",
+    ]
+    volumes:
+      - $PWD/build/docker/prometheus/prometheus-config.yml:/etc/prometheus/prometheus-config.yml
+    ports:
+      - "9090:9090"
+    profiles:
+      - monitoring
+    networks:
+      - rental_network
+
+  grafana:
+    container_name: grafana
+    hostname: grafana
+    image: grafana/grafana:9.0.9
+    volumes:
+      - $PWD/build/docker/grafana/grafana.ini:/etc/grafana/grafana.ini
+      - $PWD/build/docker/grafana/provisioning/:/etc/grafana/provisioning/
+    ports:
+      - "3000:3000"
+    profiles:
+      - monitoring
+    networks:
+      - rental_network
+
+configs:
+  pgpass:
+    content: db:5432:*:postgres:postgres
+  servers.json:
+    content: |
+      {"Servers": {
+        "1": {
+          "Group": "Servers",
+          "Name": "My Local Postgres 16",
+          "Host": "db",
+          "Port": 5432,
+          "MaintenanceDB": "postgres",
+          "Username": "postgres",
+          "PassFile": "/pgpass",
+          "SSLMode": "prefer"
+        }
+      }}
+
+volumes:
+  pgdata: {}
+
+networks:
+  rental_network:
+    name: rental_network
+    driver: bridge
+    ipam:
+      config:
+       - subnet: 10.5.0.0/16
+         gateway: 10.5.0.1
+
